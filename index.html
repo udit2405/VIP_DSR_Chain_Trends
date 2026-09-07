@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIP DSR — Chain Trends</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --ink:#e8eaed; --muted:#9aa3b2; --accent:#4f8cff;
+    --vip:#4f8cff; --at:#f5a524; --saf:#e5484d; --tot:#8b93a7;
+    --good:#2ecc71; --bad:#e5484d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0;font-weight:650}
+  header .sub{color:var(--muted);font-size:12px}
+  .wrap{padding:20px 22px;max-width:1240px;margin:0 auto}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:18px}
+  .panel h2{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+  label.fld{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+  select,button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 11px;font-size:13px}
+  select[multiple]{min-width:180px;height:120px}
+  button{cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .drop{border:1.5px dashed var(--line);border-radius:10px;padding:26px;text-align:center;color:var(--muted);transition:.15s}
+  .drop.hot{border-color:var(--accent);color:var(--ink);background:var(--panel2)}
+  .months{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:7px}
+  .chip button{border:none;background:none;color:var(--muted);padding:0 2px;font-size:14px}
+  .chip button:hover{color:var(--bad)}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  thead th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0;background:var(--panel)}
+  tbody tr:hover{background:var(--panel2)}
+  tfoot td{font-weight:700;border-top:2px solid var(--line)}
+  .scroll{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .tabs{display:flex;gap:4px;margin-bottom:16px}
+  .tabs button{border-radius:7px 7px 0 0;border-bottom:none}
+  .tabs button.on{background:var(--panel);border-color:var(--line);color:var(--ink);font-weight:600}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:18px}
+  .chartbox h3{margin:0 0 10px;font-size:13px;color:var(--muted)}
+  canvas{max-height:340px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+  .kpi .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:3px}
+  .kpi .d{font-size:12px;margin-top:2px}
+  .up{color:var(--good)} .down{color:var(--bad)}
+  .pill{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .muted{color:var(--muted)}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px}
+  .hidden{display:none}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>VIP DSR — Chain Trends</h1>
+  <span class="sub">Chain-wise date-wise <b>Vip Total</b>, <b>AT Total</b>, <b>SAF</b> + brand share &nbsp;·&nbsp; multi-month comparison &nbsp;·&nbsp; figures in ₹ Lakhs</span>
+</header>
+
+<div class="wrap">
+
+  <div class="panel">
+    <h2>1 · Load monthly DSR files</h2>
+    <div id="drop" class="drop">
+      Drop one or more <b>DSR &lt;MONTH&gt;.xlsx</b> files here, or
+      <label style="color:var(--accent);cursor:pointer"> browse<input id="file" type="file" accept=".xlsx,.xls" multiple hidden></label>
+      <div class="hint">Each file is read from the region sheet (e.g. “North 2”). Months are remembered in this browser — add Sep, Oct… as you get them.</div>
+    </div>
+    <div id="months" class="months"></div>
+    <div class="hint" id="loadmsg"></div>
+  </div>
+
+  <div class="panel" id="controls" style="display:none">
+    <h2>2 · Choose what to see</h2>
+    <div class="row">
+      <label class="fld">Chain
+        <select id="chain"></select>
+      </label>
+      <label class="fld">Months to compare
+        <select id="monthsel" multiple></select>
+      </label>
+      <button id="allmonths">Select all months</button>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="tabs">
+      <button data-tab="detail" class="on">Date-wise (single month)</button>
+      <button data-tab="compare">Month comparison &amp; trends</button>
+    </div>
+
+    <!-- DETAIL -->
+    <section id="tab-detail">
+      <div class="row" style="margin-bottom:14px">
+        <label class="fld">Month
+          <select id="detailmonth"></select>
+        </label>
+      </div>
+      <div class="kpis" id="detailKpis"></div>
+      <div class="grid2">
+        <div class="chartbox"><h3>Daily value — Vip Total / AT Total / SAF (₹ Lakhs)</h3><canvas id="cDaily"></canvas></div>
+        <div class="chartbox"><h3>Daily brand share (%)</h3><canvas id="cShare"></canvas></div>
+      </div>
+      <div class="chartbox">
+        <h3>Date-wise table
+          <button id="dlDetail" style="float:right;padding:4px 9px;font-size:12px">Download CSV</button>
+        </h3>
+        <div class="scroll"><table id="tDetail"></table></div>
+      </div>
+    </section>
+
+    <!-- COMPARE -->
+    <section id="tab-compare" class="hidden">
+      <div class="kpis" id="cmpKpis"></div>
+      <div class="grid2">
+        <div class="chartbox"><h3>Monthly total by brand (₹ Lakhs)</h3><canvas id="cMonthBar"></canvas></div>
+        <div class="chartbox"><h3>Monthly brand share (%)</h3><canvas id="cMonthShare"></canvas></div>
+      </div>
+      <div class="chartbox"><h3>Trend — monthly total (₹ Lakhs)</h3><canvas id="cTrend"></canvas></div>
+      <div class="chartbox"><h3>Trend — daily run-rate within each month (₹ Lakhs/day)</h3><canvas id="cRunrate"></canvas></div>
+      <div class="chartbox">
+        <h3>Month-over-month table
+          <button id="dlCmp" style="float:right;padding:4px 9px;font-size:12px">Download CSV</button>
+        </h3>
+        <div class="scroll"><table id="tCmp"></table></div>
+      </div>
+    </section>
+  </div>
+
+  <p class="hint">Single-file tool. Nothing is uploaded anywhere — parsing and storage happen in your browser only.</p>
+</div>
+
+<script>
+const LS_KEY = "vip_dsr_months_v1";
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const BRANDS = [
+  {key:"vip", label:"Vip Total", css:"--vip"},
+  {key:"at",  label:"AT Total",  css:"--at"},
+  {key:"saf", label:"SAF",       css:"--saf"},
+];
+const col = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+const fmt = (n,d=2) => (n==null||isNaN(n)) ? "–" : Number(n).toLocaleString("en-IN",{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct = n => (n==null||isNaN(n)) ? "–" : (n*100).toFixed(1)+"%";
+
+let store = load();
+let charts = {};
+
+/* ---------- storage ---------- */
+function load(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }catch(e){ return {}; } }
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(store)); }
+
+/* ---------- parse a workbook ---------- */
+function norm(s){ return String(s==null?"":s).replace(/ /g," ").trim(); }
+
+function parseWorkbook(wb, fname){
+  // find the sheet that looks like the store grid
+  let best=null, bestScore=-1;
+  for(const name of wb.SheetNames){
+    const ws = wb.Sheets[name];
+    const aoa = XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+    let score=0;
+    for(let r=0;r<Math.min(5,aoa.length);r++){
+      const row=(aoa[r]||[]).map(norm);
+      if(row.includes("Chain")) score+=2;
+      score += row.filter(x=>x==="Vip Total").length;
+      score += row.filter(x=>x==="AT Total").length;
+    }
+    if(score>bestScore){ bestScore=score; best={name,aoa}; }
+  }
+  if(!best || bestScore<3) throw new Error("No DSR store grid found in "+fname);
+  const {aoa,name} = best;
+
+  // header row = the one containing "Chain"
+  let hr = aoa.findIndex(row => (row||[]).map(norm).includes("Chain"));
+  if(hr<0) hr = 1;
+  const header = (aoa[hr]||[]).map(norm);
+  const chainCol = header.indexOf("Chain");
+
+  // day blocks: every column where header == "Vip Total", with +4 == "AT Total", +5 == "SAF"
+  // skip the grand-TOTAL block (row above header, same col-4, holds text "TOTAL")
+  const markerRow = (aoa[hr-1]||[]).map(norm);
+  const dayCols = [];
+  for(let c=0;c<header.length;c++){
+    if(header[c]==="Vip Total" && header[c+4]==="AT Total" && header[c+5]==="SAF"){
+      const marker = markerRow[c-4];
+      if(marker==="TOTAL") continue;
+      dayCols.push(c);
+    }
+  }
+  if(!dayCols.length) throw new Error("No daily brand blocks found in "+fname);
+
+  // month/year: look for a "1st Aug" style header anywhere, else filename
+  let mIdx=null, year=null;
+  const scanText = aoa.slice(0,hr+1).flat().map(norm).join(" | ");
+  let m = scanText.match(/\b\d{1,2}(?:st|nd|rd|th)\s+([A-Za-z]{3,})/);
+  if(m){ mIdx = MONTHS.findIndex(x=>m[1].toLowerCase().startsWith(x.toLowerCase())); }
+  let fm = fname.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*['\s]*['’]?\s*'?(\d{2,4})?/i);
+  if(mIdx==null && fm) mIdx = MONTHS.findIndex(x=>x.toLowerCase()===fm[1].slice(0,3).toLowerCase());
+  const ym = scanText.match(/'?\s?(\d{2})\b/) || (fm && fm[2] ? [0,fm[2]] : null);
+  year = ym ? (String(ym[1]).length===2 ? 2000+ +ym[1] : + ym[1]) : new Date().getFullYear();
+  if(mIdx==null) mIdx = new Date().getMonth();
+  const label = MONTHS[mIdx]+" "+year;
+  const sortKey = year*100 + mIdx;
+
+  // aggregate
+  const dates = dayCols.map((_,i)=>i+1);
+  const chains = {};
+  const add = (obj,d,v,a,s)=>{
+    obj.vip[d]+=v; obj.at[d]+=a; obj.saf[d]+=s;
+  };
+  const blank = ()=>({vip:dates.map(_=>0),at:dates.map(_=>0),saf:dates.map(_=>0)});
+  chains["All chains"] = blank();
+
+  for(let r=hr+1;r<aoa.length;r++){
+    const row = aoa[r]; if(!row) continue;
+    const ch = norm(row[chainCol]);
+    if(!ch) continue;
+    if(!chains[ch]) chains[ch]=blank();
+    dayCols.forEach((c,i)=>{
+      const v = +row[c]||0, a = +row[c+4]||0, s = +row[c+5]||0;
+      add(chains[ch],i,v,a,s);
+      add(chains["All chains"],i,v,a,s);
+    });
+  }
+  return { label, sortKey, mIdx, year, sheet:name, dates, chains, file:fname };
+}
+
+/* ---------- ingest files ---------- */
+function handleFiles(list){
+  const files=[...list]; if(!files.length) return;
+  let done=0, errs=[];
+  document.getElementById("loadmsg").textContent = "Reading "+files.length+" file(s)…";
+  files.forEach(f=>{
+    const rd=new FileReader();
+    rd.onload = e=>{
+      try{
+        const wb = XLSX.read(new Uint8Array(e.target.result),{type:"array"});
+        const parsed = parseWorkbook(wb, f.name);
+        store[parsed.label] = parsed;
+        save();
+      }catch(err){ errs.push(err.message); }
+      if(++done===files.length){
+        document.getElementById("loadmsg").textContent = errs.length ? ("Issues: "+errs.join("; ")) : "Loaded.";
+        render();
+      }
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+
+/* ---------- UI wiring ---------- */
+const drop=document.getElementById("drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));
+drop.addEventListener("drop",e=>handleFiles(e.dataTransfer.files));
+document.getElementById("file").addEventListener("change",e=>handleFiles(e.target.files));
+
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x===b));
+  document.getElementById("tab-detail").classList.toggle("hidden",b.dataset.tab!=="detail");
+  document.getElementById("tab-compare").classList.toggle("hidden",b.dataset.tab!=="compare");
+}));
+
+document.getElementById("chain").addEventListener("change",render);
+document.getElementById("monthsel").addEventListener("change",render);
+document.getElementById("detailmonth").addEventListener("change",render);
+document.getElementById("allmonths").addEventListener("click",()=>{
+  [...document.getElementById("monthsel").options].forEach(o=>o.selected=true); render();
+});
+
+/* ---------- helpers ---------- */
+function monthsSorted(){ return Object.values(store).sort((a,b)=>a.sortKey-b.sortKey); }
+function selectedMonths(){
+  const sel=[...document.getElementById("monthsel").selectedOptions].map(o=>o.value);
+  const all=monthsSorted();
+  return sel.length ? all.filter(m=>sel.includes(m.label)) : all;
+}
+function chainSeries(month, chain){
+  const c = month.chains[chain] || month.chains["All chains"];
+  const n = month.dates.length;
+  const tot = i => c.vip[i]+c.at[i]+c.saf[i];
+  return {
+    dates: month.dates,
+    vip:c.vip, at:c.at, saf:c.saf,
+    total: month.dates.map((_,i)=>tot(i)),
+    sum: { vip:sum(c.vip), at:sum(c.at), saf:sum(c.saf), total:sum(c.vip)+sum(c.at)+sum(c.saf) }
+  };
+}
+const sum = a => a.reduce((x,y)=>x+ (+y||0),0);
+function mkChart(id,cfg){ if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
+const gridClr = "rgba(255,255,255,.06)";
+Chart.defaults.color = col("--muted");
+Chart.defaults.font.family = "inherit";
+
+/* ---------- render ---------- */
+function render(){
+  const all = monthsSorted();
+  // month chips
+  document.getElementById("months").innerHTML = all.map(m=>
+    `<span class="chip">${m.label} <span class="muted">· ${m.sheet} · ${m.dates.length}d</span><button data-del="${m.label}">×</button></span>`
+  ).join("") || "";
+  document.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{ delete store[b.dataset.del]; save(); render(); });
+
+  if(!all.length){ document.getElementById("controls").style.display="none"; document.getElementById("app").style.display="none"; return; }
+  document.getElementById("controls").style.display="";
+  document.getElementById("app").style.display="";
+
+  // chain list = union
+  const chainSet = new Set(["All chains"]);
+  all.forEach(m=>Object.keys(m.chains).forEach(c=>chainSet.add(c)));
+  const chains=[...chainSet].sort((a,b)=> a==="All chains"?-1:b==="All chains"?1:a.localeCompare(b));
+  const chainSelEl=document.getElementById("chain");
+  const curChain = chainSelEl.value && chains.includes(chainSelEl.value) ? chainSelEl.value : "All chains";
+  chainSelEl.innerHTML = chains.map(c=>`<option ${c===curChain?"selected":""}>${c}</option>`).join("");
+
+  // month multiselect
+  const msel=document.getElementById("monthsel");
+  const prevSel=new Set([...msel.selectedOptions].map(o=>o.value));
+  msel.innerHTML = all.map(m=>`<option ${prevSel.size===0||prevSel.has(m.label)?"selected":""}>${m.label}</option>`).join("");
+
+  // detail month dropdown
+  const dm=document.getElementById("detailmonth");
+  const prevDm=dm.value;
+  dm.innerHTML = all.map(m=>`<option ${m.label===prevDm?"selected":""}>${m.label}</option>`).join("");
+  if(!dm.value) dm.value = all[all.length-1].label;
+
+  renderDetail(curChain);
+  renderCompare(curChain);
+}
+
+function renderDetail(chain){
+  const m = store[document.getElementById("detailmonth").value];
+  if(!m) return;
+  const s = chainSeries(m, chain);
+  const n = s.dates.length;
+
+  // KPIs
+  const k=document.getElementById("detailKpis");
+  const share = b => s.sum.total? s.sum[b]/s.sum.total : 0;
+  k.innerHTML = `
+    <div class="kpi"><div class="k">${m.label} · ${chain}</div><div class="v">₹${fmt(s.sum.total,1)}L</div><div class="d muted">${n} days · ₹${fmt(s.sum.total/n,2)}L/day</div></div>
+    <div class="kpi"><div class="k"><span class="pill" style="background:${col('--vip')}"></span>Vip Total</div><div class="v">₹${fmt(s.sum.vip,1)}L</div><div class="d muted">share ${pct(share('vip'))}</div></div>
+    <div class="kpi"><div class="k"><span class="pill" style="background:${col('--at')}"></span>AT Total</div><div class="v">₹${fmt(s.sum.at,1)}L</div><div class="d muted">share ${pct(share('at'))}</div></div>
+    <div class="kpi"><div class="k"><span class="pill" style="background:${col('--saf')}"></span>SAF</div><div class="v">₹${fmt(s.sum.saf,1)}L</div><div class="d muted">share ${pct(share('saf'))}</div></div>`;
+
+  const labels = s.dates.map(d=>d+" "+MONTHS[m.mIdx]);
+  mkChart("cDaily",{type:"line",data:{labels,datasets:[
+    ds("Vip Total",s.vip,col("--vip")), ds("AT Total",s.at,col("--at")), ds("SAF",s.saf,col("--saf"))
+  ]},options:lineOpts()});
+
+  const shareData = b => s.dates.map((_,i)=>{ const t=s.vip[i]+s.at[i]+s.saf[i]; return t? (s[b][i]/t*100):0; });
+  mkChart("cShare",{type:"line",data:{labels,datasets:[
+    dsFill("Vip Total",shareData("vip"),col("--vip")), dsFill("AT Total",shareData("at"),col("--at")), dsFill("SAF",shareData("saf"),col("--saf"))
+  ]},options:lineOpts(true)});
+
+  // table
+  const rows = s.dates.map((d,i)=>{
+    const t=s.vip[i]+s.at[i]+s.saf[i];
+    return `<tr><td>${d} ${MONTHS[m.mIdx]}</td>
+      <td>${fmt(s.vip[i])}</td><td>${fmt(s.at[i])}</td><td>${fmt(s.saf[i])}</td><td>${fmt(t)}</td>
+      <td>${t?pct(s.vip[i]/t):"–"}</td><td>${t?pct(s.at[i]/t):"–"}</td><td>${t?pct(s.saf[i]/t):"–"}</td></tr>`;
+  }).join("");
+  document.getElementById("tDetail").innerHTML = `
+    <thead><tr><th>Date</th><th>Vip Total</th><th>AT Total</th><th>SAF</th><th>Total</th><th>VIP %</th><th>AT %</th><th>SAF %</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td>Total</td><td>${fmt(s.sum.vip)}</td><td>${fmt(s.sum.at)}</td><td>${fmt(s.sum.saf)}</td><td>${fmt(s.sum.total)}</td>
+      <td>${pct(share('vip'))}</td><td>${pct(share('at'))}</td><td>${pct(share('saf'))}</td></tr></tfoot>`;
+
+  document.getElementById("dlDetail").onclick = ()=>csv(`DSR_${chain}_${m.label}`.replace(/\W+/g,"_"),
+    ["Date","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"],
+    s.dates.map((d,i)=>{const t=s.vip[i]+s.at[i]+s.saf[i];return [d+" "+MONTHS[m.mIdx],s.vip[i],s.at[i],s.saf[i],t,t?s.vip[i]/t:"",t?s.at[i]/t:"",t?s.saf[i]/t:""];}));
+}
+
+function renderCompare(chain){
+  const months = selectedMonths();
+  const series = months.map(m=>({m, s:chainSeries(m,chain)}));
+  const labels = months.map(m=>m.label);
+
+  // KPIs — latest vs previous
+  const cmpK=document.getElementById("cmpKpis");
+  if(series.length>=1){
+    const last=series[series.length-1], prev=series.length>1?series[series.length-2]:null;
+    const chg=(a,b)=> b? (a-b)/b : null;
+    const box=(title,cur,pv,unit="L")=>{
+      const c=chg(cur,pv);
+      const d = c==null?`<span class="muted">no prior</span>`:`<span class="${c>=0?'up':'down'}">${c>=0?'▲':'▼'} ${(Math.abs(c)*100).toFixed(1)}% vs ${prev.m.label}</span>`;
+      return `<div class="kpi"><div class="k">${title}</div><div class="v">₹${fmt(cur,1)}${unit}</div><div class="d">${d}</div></div>`;
+    };
+    cmpK.innerHTML =
+      box(`${last.m.label} · ${chain} · Total`, last.s.sum.total, prev&&prev.s.sum.total) +
+      box("Vip Total", last.s.sum.vip, prev&&prev.s.sum.vip) +
+      box("AT Total", last.s.sum.at, prev&&prev.s.sum.at) +
+      box("SAF", last.s.sum.saf, prev&&prev.s.sum.saf);
+  } else cmpK.innerHTML="";
+
+  mkChart("cMonthBar",{type:"bar",data:{labels,datasets:[
+    {label:"Vip Total",data:series.map(x=>x.s.sum.vip),backgroundColor:col("--vip")},
+    {label:"AT Total",data:series.map(x=>x.s.sum.at),backgroundColor:col("--at")},
+    {label:"SAF",data:series.map(x=>x.s.sum.saf),backgroundColor:col("--saf")},
+  ]},options:barOpts()});
+
+  mkChart("cMonthShare",{type:"bar",data:{labels,datasets:[
+    {label:"Vip Total",data:series.map(x=>share(x.s,'vip')),backgroundColor:col("--vip")},
+    {label:"AT Total",data:series.map(x=>share(x.s,'at')),backgroundColor:col("--at")},
+    {label:"SAF",data:series.map(x=>share(x.s,'saf')),backgroundColor:col("--saf")},
+  ]},options:barOpts(true)});
+
+  mkChart("cTrend",{type:"line",data:{labels,datasets:[
+    ds("Vip Total",series.map(x=>x.s.sum.vip),col("--vip")),
+    ds("AT Total",series.map(x=>x.s.sum.at),col("--at")),
+    ds("SAF",series.map(x=>x.s.sum.saf),col("--saf")),
+    ds("Total",series.map(x=>x.s.sum.total),col("--tot")),
+  ]},options:lineOpts()});
+
+  mkChart("cRunrate",{type:"line",data:{labels,datasets:[
+    ds("Vip Total/day",series.map(x=>x.s.sum.vip/x.s.dates.length),col("--vip")),
+    ds("AT Total/day",series.map(x=>x.s.sum.at/x.s.dates.length),col("--at")),
+    ds("SAF/day",series.map(x=>x.s.sum.saf/x.s.dates.length),col("--saf")),
+  ]},options:lineOpts()});
+
+  // MoM table
+  const hdr = `<thead><tr><th>Month</th><th>Vip Total</th><th>Δ</th><th>AT Total</th><th>Δ</th><th>SAF</th><th>Δ</th><th>Total</th><th>Δ</th><th>VIP %</th><th>AT %</th><th>SAF %</th></tr></thead>`;
+  const body = series.map((x,i)=>{
+    const p = i? series[i-1].s.sum : null;
+    const d = (a,b)=> b? `<span class="${a>=b?'up':'down'}">${a>=b?'+':''}${((a-b)/b*100).toFixed(1)}%</span>` : "–";
+    const S=x.s.sum;
+    return `<tr><td>${x.m.label}</td>
+      <td>${fmt(S.vip,1)}</td><td>${d(S.vip,p&&p.vip)}</td>
+      <td>${fmt(S.at,1)}</td><td>${d(S.at,p&&p.at)}</td>
+      <td>${fmt(S.saf,1)}</td><td>${d(S.saf,p&&p.saf)}</td>
+      <td>${fmt(S.total,1)}</td><td>${d(S.total,p&&p.total)}</td>
+      <td>${pct(share(x.s,'vip')/100)}</td><td>${pct(share(x.s,'at')/100)}</td><td>${pct(share(x.s,'saf')/100)}</td></tr>`;
+  }).join("");
+  document.getElementById("tCmp").innerHTML = hdr+"<tbody>"+body+"</tbody>";
+
+  document.getElementById("dlCmp").onclick = ()=>csv(`DSR_${chain}_compare`.replace(/\W+/g,"_"),
+    ["Month","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"],
+    series.map(x=>{const S=x.s.sum;return [x.m.label,S.vip,S.at,S.saf,S.total,share(x.s,'vip')/100,share(x.s,'at')/100,share(x.s,'saf')/100];}));
+}
+function share(s,b){ return s.sum.total? s.sum[b]/s.sum.total*100 : 0; }
+
+/* ---------- chart option helpers ---------- */
+function ds(label,data,c){ return {label,data,borderColor:c,backgroundColor:c,tension:.25,pointRadius:2,borderWidth:2}; }
+function dsFill(label,data,c){ return {label,data,borderColor:c,backgroundColor:c+"22",fill:true,tension:.25,pointRadius:0,borderWidth:1.5}; }
+function lineOpts(isPct){ return {responsive:true,interaction:{mode:"index",intersect:false},
+  plugins:{legend:{labels:{boxWidth:12}},tooltip:{callbacks:{label:c=>c.dataset.label+": "+(isPct?c.parsed.y.toFixed(1)+"%":"₹"+fmt(c.parsed.y)+"L")}}},
+  scales:{x:{grid:{color:gridClr}},y:{grid:{color:gridClr},ticks:{callback:v=>isPct?v+"%":v}}}}; }
+function barOpts(isPct){ return {responsive:true,
+  plugins:{legend:{labels:{boxWidth:12}},tooltip:{callbacks:{label:c=>c.dataset.label+": "+(isPct?c.parsed.y.toFixed(1)+"%":"₹"+fmt(c.parsed.y)+"L")}}},
+  scales:{x:{stacked:isPct,grid:{color:gridClr}},y:{stacked:isPct,grid:{color:gridClr},max:isPct?100:undefined,ticks:{callback:v=>isPct?v+"%":v}}}}; }
+
+/* ---------- csv ---------- */
+function csv(name,head,rows){
+  const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+  const txt=[head.map(esc).join(",")].concat(rows.map(r=>r.map(esc).join(","))).join("\n");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"}));
+  a.download=name+".csv"; a.click();
+}
+
+render();
+</script>
+</body>
+</html>
