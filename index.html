@@ -111,13 +111,13 @@
       <button id="allmonths">Select all months</button>
     </div>
     <div class="row" style="margin-top:16px;align-items:flex-start">
-      <label class="fld">Chains / stores for Excel export (tick multiple)
+      <label class="fld">Stores for Excel export (tick multiple) — from "Current Store Name"
         <div id="chainChecks" class="checklist"></div>
       </label>
       <div class="btncol">
-        <button id="chainAll">Select all chains</button>
+        <button id="chainAll">Select all stores</button>
         <button id="chainNone">Clear selection</button>
-        <button id="downloadExcel" class="primary">Download Excel — 1 sheet per chain</button>
+        <button id="downloadExcel" class="primary">Download Excel — 1 sheet per store</button>
       </div>
     </div>
   </div>
@@ -215,7 +215,7 @@ function load(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }ca
 function save(){ localStorage.setItem(LS_KEY, JSON.stringify(store)); }
 
 /* ---------- parse a workbook ---------- */
-function norm(s){ return String(s==null?"":s).replace(/ /g," ").trim(); }
+function norm(s){ return String(s==null?"":s).replace(/\s+/g," ").trim(); }
 
 function parseWorkbook(wb, fname, forcedMonthIdx){
   // find the sheet that looks like the store grid
@@ -240,6 +240,7 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
   if(hr<0) hr = 1;
   const header = (aoa[hr]||[]).map(norm);
   const chainCol = header.indexOf("Chain");
+  const storeCol = header.indexOf("Current Store Name");
 
   // day blocks: every column where header == "Vip Total", with +4 == "AT Total", +5 == "SAF"
   // skip the grand-TOTAL block (row above header, same col-4, holds text "TOTAL")
@@ -271,27 +272,32 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
   const label = MONTHS[mIdx]+" "+year;
   const sortKey = year*100 + mIdx;
 
-  // aggregate
+  // aggregate — by chain (for the Chain dropdown/charts) and, separately, by individual store
   const dates = dayCols.map((_,i)=>i+1);
   const chains = {};
+  const stores = {};
   const add = (obj,d,v,a,s)=>{
     obj.vip[d]+=v; obj.at[d]+=a; obj.saf[d]+=s;
   };
   const blank = ()=>({vip:dates.map(_=>0),at:dates.map(_=>0),saf:dates.map(_=>0)});
   chains["All chains"] = blank();
+  if(storeCol>=0) stores["All stores"] = blank();
 
   for(let r=hr+1;r<aoa.length;r++){
     const row = aoa[r]; if(!row) continue;
     const ch = norm(row[chainCol]);
     if(!ch) continue;
     if(!chains[ch]) chains[ch]=blank();
+    const st = storeCol>=0 ? norm(row[storeCol]) : null;
+    if(st && !stores[st]) stores[st]=blank();
     dayCols.forEach((c,i)=>{
       const v = +row[c]||0, a = +row[c+4]||0, s = +row[c+5]||0;
       add(chains[ch],i,v,a,s);
       add(chains["All chains"],i,v,a,s);
+      if(st){ add(stores[st],i,v,a,s); add(stores["All stores"],i,v,a,s); }
     });
   }
-  return { label, sortKey, mIdx, year, sheet:name, dates, chains, file:fname };
+  return { label, sortKey, mIdx, year, sheet:name, dates, chains, stores, file:fname };
 }
 
 /* ---------- ingest a single file, pinned to one month tab ---------- */
@@ -361,7 +367,7 @@ document.getElementById("detailmonth").addEventListener("change",e=>{
 document.getElementById("allmonths").addEventListener("click",()=>{
   [...document.getElementById("monthsel").options].forEach(o=>o.selected=true); render();
 });
-document.getElementById("chainAll").addEventListener("click",()=>{ allChainNames().forEach(c=>chainExportSel.add(c)); render(); });
+document.getElementById("chainAll").addEventListener("click",()=>{ allStoreNames().forEach(c=>chainExportSel.add(c)); render(); });
 document.getElementById("chainNone").addEventListener("click",()=>{ chainExportSel.clear(); render(); });
 document.getElementById("downloadExcel").addEventListener("click", exportExcel);
 
@@ -372,14 +378,17 @@ function allChainNames(){
   monthsSorted().forEach(m=>Object.keys(m.chains).forEach(c=>s.add(c)));
   return [...s].sort((a,b)=> a==="All chains"?-1:b==="All chains"?1:a.localeCompare(b));
 }
+function allStoreNames(){
+  const s = new Set(["All stores"]);
+  monthsSorted().forEach(m=>Object.keys(m.stores||{}).forEach(c=>s.add(c)));
+  return [...s].sort((a,b)=> a==="All stores"?-1:b==="All stores"?1:a.localeCompare(b));
+}
 function selectedMonths(){
   const sel=[...document.getElementById("monthsel").selectedOptions].map(o=>o.value);
   const all=monthsSorted();
   return sel.length ? all.filter(m=>sel.includes(m.label)) : all;
 }
-function chainSeries(month, chain){
-  const c = month.chains[chain] || month.chains["All chains"];
-  const n = month.dates.length;
+function seriesFrom(c, month){
   const tot = i => c.vip[i]+c.at[i]+c.saf[i];
   return {
     dates: month.dates,
@@ -387,6 +396,13 @@ function chainSeries(month, chain){
     total: month.dates.map((_,i)=>tot(i)),
     sum: { vip:sum(c.vip), at:sum(c.at), saf:sum(c.saf), total:sum(c.vip)+sum(c.at)+sum(c.saf) }
   };
+}
+function chainSeries(month, chain){
+  return seriesFrom(month.chains[chain] || month.chains["All chains"], month);
+}
+function storeSeries(month, store){
+  const c = (month.stores && month.stores[store]) || (month.stores && month.stores["All stores"]);
+  return c ? seriesFrom(c, month) : seriesFrom({vip:month.dates.map(_=>0),at:month.dates.map(_=>0),saf:month.dates.map(_=>0)}, month);
 }
 const sum = a => a.reduce((x,y)=>x+ (+y||0),0);
 function mkChart(id,cfg){ if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
@@ -457,11 +473,12 @@ function render(){
   const curChain = chainSelEl.value && chains.includes(chainSelEl.value) ? chainSelEl.value : "All chains";
   chainSelEl.innerHTML = chains.map(c=>`<option ${c===curChain?"selected":""}>${c}</option>`).join("");
 
-  // chain export checklist (multi-select) — default: everything ticked the first time it appears
-  if(!chainExportInited){ chains.forEach(c=>chainExportSel.add(c)); chainExportInited=true; }
-  else { chains.forEach(c=>{ if(!chainExportSel.has(c) && !chainExportSeenOnce.has(c)) chainExportSel.add(c); chainExportSeenOnce.add(c); }); }
+  // store export checklist (multi-select) — labels come from "Current Store Name"; default: everything ticked the first time it appears
+  const stores = allStoreNames();
+  if(!chainExportInited){ stores.forEach(c=>chainExportSel.add(c)); chainExportInited=true; }
+  else { stores.forEach(c=>{ if(!chainExportSel.has(c) && !chainExportSeenOnce.has(c)) chainExportSel.add(c); chainExportSeenOnce.add(c); }); }
   const cc=document.getElementById("chainChecks");
-  cc.innerHTML = chains.map(c=>`<label><input type="checkbox" data-chain="${c.replace(/"/g,'&quot;')}" ${chainExportSel.has(c)?"checked":""}> ${c}</label>`).join("");
+  cc.innerHTML = stores.map(c=>`<label><input type="checkbox" data-chain="${c.replace(/"/g,'&quot;')}" ${chainExportSel.has(c)?"checked":""}> ${c}</label>`).join("");
   cc.querySelectorAll("[data-chain]").forEach(cb=>cb.addEventListener("change",()=>{
     if(cb.checked) chainExportSel.add(cb.dataset.chain); else chainExportSel.delete(cb.dataset.chain);
   }));
@@ -686,18 +703,18 @@ function sanitizeSheetName(name, used){
 const r2 = n => Math.round((+n||0)*100)/100;
 
 function exportExcel(){
-  const chains = allChainNames().filter(c=>chainExportSel.has(c));
-  if(!chains.length){ alert("Tick at least one chain/store to export."); return; }
+  const stores = allStoreNames().filter(c=>chainExportSel.has(c));
+  if(!stores.length){ alert("Tick at least one store to export."); return; }
   const months = monthsSorted();
   if(!months.length) return;
 
   const wb = XLSX.utils.book_new();
   const used = new Set();
-  chains.forEach(chain=>{
+  stores.forEach(store=>{
     const aoa = [["Month","Date","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"]];
     months.forEach(m=>{
-      if(!m.chains[chain]) return;
-      const s = chainSeries(m,chain);
+      if(!m.stores || !m.stores[store]) return;
+      const s = storeSeries(m,store);
       s.dates.forEach((d,i)=>{
         const t = s.vip[i]+s.at[i]+s.saf[i];
         aoa.push([m.label, d+" "+MONTHS[m.mIdx], r2(s.vip[i]), r2(s.at[i]), r2(s.saf[i]), r2(t),
@@ -706,13 +723,13 @@ function exportExcel(){
       aoa.push([m.label+" — Total","", r2(s.sum.vip), r2(s.sum.at), r2(s.sum.saf), r2(s.sum.total),
         s.sum.total?r2(s.sum.vip/s.sum.total*100):0, s.sum.total?r2(s.sum.at/s.sum.total*100):0, s.sum.total?r2(s.sum.saf/s.sum.total*100):0]);
     });
-    if(aoa.length===1) aoa.push(["No data for this chain in the loaded months."]);
+    if(aoa.length===1) aoa.push(["No data for this store in the loaded months."]);
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!cols"] = [{wch:14},{wch:12},{wch:11},{wch:11},{wch:9},{wch:9},{wch:8},{wch:8},{wch:8}];
-    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(chain, used));
+    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(store, used));
   });
   const stamp = months.length>1 ? (months[0].label+"–"+months[months.length-1].label) : months[0].label;
-  XLSX.writeFile(wb, ("VIP_DSR_by_chain_"+stamp).replace(/\W+/g,"_")+".xlsx");
+  XLSX.writeFile(wb, ("VIP_DSR_by_store_"+stamp).replace(/\W+/g,"_")+".xlsx");
 }
 
 render();
