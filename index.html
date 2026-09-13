@@ -61,6 +61,10 @@
   .hint{font-size:12px;color:var(--muted);margin-top:8px}
   .hidden{display:none}
   a{color:var(--accent)}
+  .checklist{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;max-height:170px;overflow:auto;min-width:220px}
+  .checklist label{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12.5px;white-space:nowrap}
+  .checklist input{accent-color:var(--accent)}
+  .btncol{display:flex;flex-direction:column;gap:8px}
 </style>
 </head>
 <body>
@@ -92,6 +96,16 @@
         <select id="monthsel" multiple></select>
       </label>
       <button id="allmonths">Select all months</button>
+    </div>
+    <div class="row" style="margin-top:16px;align-items:flex-start">
+      <label class="fld">Chains / stores for Excel export (tick multiple)
+        <div id="chainChecks" class="checklist"></div>
+      </label>
+      <div class="btncol">
+        <button id="chainAll">Select all chains</button>
+        <button id="chainNone">Clear selection</button>
+        <button id="downloadExcel" class="primary">Download Excel — 1 sheet per chain</button>
+      </div>
     </div>
   </div>
 
@@ -156,6 +170,9 @@ const pct = n => (n==null||isNaN(n)) ? "–" : (n*100).toFixed(1)+"%";
 
 let store = load();
 let charts = {};
+let chainExportSel = new Set();
+let chainExportInited = false;
+let chainExportSeenOnce = new Set();
 
 /* ---------- storage ---------- */
 function load(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }catch(e){ return {}; } }
@@ -279,9 +296,17 @@ document.getElementById("detailmonth").addEventListener("change",render);
 document.getElementById("allmonths").addEventListener("click",()=>{
   [...document.getElementById("monthsel").options].forEach(o=>o.selected=true); render();
 });
+document.getElementById("chainAll").addEventListener("click",()=>{ allChainNames().forEach(c=>chainExportSel.add(c)); render(); });
+document.getElementById("chainNone").addEventListener("click",()=>{ chainExportSel.clear(); render(); });
+document.getElementById("downloadExcel").addEventListener("click", exportExcel);
 
 /* ---------- helpers ---------- */
 function monthsSorted(){ return Object.values(store).sort((a,b)=>a.sortKey-b.sortKey); }
+function allChainNames(){
+  const s = new Set(["All chains"]);
+  monthsSorted().forEach(m=>Object.keys(m.chains).forEach(c=>s.add(c)));
+  return [...s].sort((a,b)=> a==="All chains"?-1:b==="All chains"?1:a.localeCompare(b));
+}
 function selectedMonths(){
   const sel=[...document.getElementById("monthsel").selectedOptions].map(o=>o.value);
   const all=monthsSorted();
@@ -318,12 +343,19 @@ function render(){
   document.getElementById("app").style.display="";
 
   // chain list = union
-  const chainSet = new Set(["All chains"]);
-  all.forEach(m=>Object.keys(m.chains).forEach(c=>chainSet.add(c)));
-  const chains=[...chainSet].sort((a,b)=> a==="All chains"?-1:b==="All chains"?1:a.localeCompare(b));
+  const chains = allChainNames();
   const chainSelEl=document.getElementById("chain");
   const curChain = chainSelEl.value && chains.includes(chainSelEl.value) ? chainSelEl.value : "All chains";
   chainSelEl.innerHTML = chains.map(c=>`<option ${c===curChain?"selected":""}>${c}</option>`).join("");
+
+  // chain export checklist (multi-select) — default: everything ticked the first time it appears
+  if(!chainExportInited){ chains.forEach(c=>chainExportSel.add(c)); chainExportInited=true; }
+  else { chains.forEach(c=>{ if(!chainExportSel.has(c) && !chainExportSeenOnce.has(c)) chainExportSel.add(c); chainExportSeenOnce.add(c); }); }
+  const cc=document.getElementById("chainChecks");
+  cc.innerHTML = chains.map(c=>`<label><input type="checkbox" data-chain="${c.replace(/"/g,'&quot;')}" ${chainExportSel.has(c)?"checked":""}> ${c}</label>`).join("");
+  cc.querySelectorAll("[data-chain]").forEach(cb=>cb.addEventListener("change",()=>{
+    if(cb.checked) chainExportSel.add(cb.dataset.chain); else chainExportSel.delete(cb.dataset.chain);
+  }));
 
   // month multiselect
   const msel=document.getElementById("monthsel");
@@ -468,6 +500,49 @@ function csv(name,head,rows){
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"}));
   a.download=name+".csv"; a.click();
+}
+
+/* ---------- excel (one sheet per chain) ---------- */
+function sanitizeSheetName(name, used){
+  let n = String(name).replace(/[\\\/\?\*\[\]:]/g,"-").trim().slice(0,31) || "Sheet";
+  if(!used.has(n)){ used.add(n); return n; }
+  let i=2, base=n;
+  while(true){
+    const suf="~"+i, n2 = base.slice(0, 31-suf.length)+suf;
+    if(!used.has(n2)){ used.add(n2); return n2; }
+    i++;
+  }
+}
+const r2 = n => Math.round((+n||0)*100)/100;
+
+function exportExcel(){
+  const chains = allChainNames().filter(c=>chainExportSel.has(c));
+  if(!chains.length){ alert("Tick at least one chain/store to export."); return; }
+  const months = monthsSorted();
+  if(!months.length) return;
+
+  const wb = XLSX.utils.book_new();
+  const used = new Set();
+  chains.forEach(chain=>{
+    const aoa = [["Month","Date","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"]];
+    months.forEach(m=>{
+      if(!m.chains[chain]) return;
+      const s = chainSeries(m,chain);
+      s.dates.forEach((d,i)=>{
+        const t = s.vip[i]+s.at[i]+s.saf[i];
+        aoa.push([m.label, d+" "+MONTHS[m.mIdx], r2(s.vip[i]), r2(s.at[i]), r2(s.saf[i]), r2(t),
+          t?r2(s.vip[i]/t*100):0, t?r2(s.at[i]/t*100):0, t?r2(s.saf[i]/t*100):0]);
+      });
+      aoa.push([m.label+" — Total","", r2(s.sum.vip), r2(s.sum.at), r2(s.sum.saf), r2(s.sum.total),
+        s.sum.total?r2(s.sum.vip/s.sum.total*100):0, s.sum.total?r2(s.sum.at/s.sum.total*100):0, s.sum.total?r2(s.sum.saf/s.sum.total*100):0]);
+    });
+    if(aoa.length===1) aoa.push(["No data for this chain in the loaded months."]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{wch:14},{wch:12},{wch:11},{wch:11},{wch:9},{wch:9},{wch:8},{wch:8},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(chain, used));
+  });
+  const stamp = months.length>1 ? (months[0].label+"–"+months[months.length-1].label) : months[0].label;
+  XLSX.writeFile(wb, ("VIP_DSR_by_chain_"+stamp).replace(/\W+/g,"_")+".xlsx");
 }
 
 render();
