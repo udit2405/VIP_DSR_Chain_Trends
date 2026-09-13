@@ -78,6 +78,9 @@
   .mtab .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--vip);margin-left:4px;vertical-align:middle}
   .seg{display:flex;gap:6px;flex-wrap:wrap}
   .seg button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  #loadmsg{margin-top:10px;padding:0;font-size:12px;color:var(--muted)}
+  #loadmsg.ok{background:#132a1c;border:1px solid var(--good);color:#b7f0c9;padding:9px 12px;border-radius:8px;font-size:13px}
+  #loadmsg.err{background:#3a1620;border:1px solid var(--bad);color:#ffb4b4;padding:9px 12px;border-radius:8px;font-size:13px;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -229,7 +232,7 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
     }
     if(score>bestScore){ bestScore=score; best={name,aoa}; }
   }
-  if(!best || bestScore<3) throw new Error("No DSR store grid found in "+fname);
+  if(!best || bestScore<3) throw new Error(`No DSR store grid found in ${fname}. Sheets in this file: ${wb.SheetNames.join(", ")}. Looked for a sheet with a "Chain" header and "Vip Total"/"AT Total" columns in its first 5 rows.`);
   const {aoa,name} = best;
 
   // header row = the one containing "Chain"
@@ -249,7 +252,7 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
       dayCols.push(c);
     }
   }
-  if(!dayCols.length) throw new Error("No daily brand blocks found in "+fname);
+  if(!dayCols.length) throw new Error(`Found sheet "${name}" with a Chain column, but no day-by-day Vip Total/AT Total/SAF blocks in ${fname}. The column layout may not match what this tool expects.`);
 
   // month/year: look for a "1st Aug" style header anywhere, else filename
   let mIdx=null, year=null;
@@ -295,15 +298,22 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
 let pendingUploadMonthIdx = null;
 let activeMonthIdx = null;
 
+function setLoadMsg(text, kind){
+  const el = document.getElementById("loadmsg");
+  el.textContent = text;
+  el.className = kind ? kind : "";
+}
+
 function handleSingleFile(file, forcedMonthIdx){
   if(!file) return;
   const key = MONTHS[forcedMonthIdx];
   if(monthsSorted().some(m=>m.mIdx===forcedMonthIdx)){
-    document.getElementById("loadmsg").textContent = key+" is already loaded — remove it first (hover the tab) to replace.";
+    setLoadMsg(key+" is already loaded — remove it first (hover the tab) to replace.", "err");
     return;
   }
-  document.getElementById("loadmsg").textContent = "Reading "+file.name+"…";
+  setLoadMsg("Reading "+file.name+"…");
   const rd = new FileReader();
+  rd.onerror = ()=>{ setLoadMsg("Couldn't read "+file.name+" — the browser reported: "+(rd.error?rd.error.message:"unknown error"), "err"); };
   rd.onload = e=>{
     try{
       const wb = XLSX.read(new Uint8Array(e.target.result),{type:"array"});
@@ -311,9 +321,9 @@ function handleSingleFile(file, forcedMonthIdx){
       store[parsed.label] = parsed;
       save();
       activeMonthIdx = forcedMonthIdx;
-      document.getElementById("loadmsg").textContent = "Loaded "+parsed.label+" from "+file.name+".";
+      setLoadMsg("Loaded "+parsed.label+" from "+file.name+" — "+(Object.keys(parsed.chains).length-1)+" chains, "+parsed.dates.length+" days.", "ok");
     }catch(err){
-      document.getElementById("loadmsg").textContent = "Couldn't read "+file.name+": "+err.message;
+      setLoadMsg("Couldn't read "+file.name+":\n"+err.message, "err");
     }
     render();
   };
