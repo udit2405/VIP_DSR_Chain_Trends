@@ -111,12 +111,12 @@
       <button id="allmonths">Select all months</button>
     </div>
     <div class="row" style="margin-top:16px;align-items:flex-start">
-      <label class="fld">Stores for Excel export (tick multiple) — from "Current Store Name"
+      <label class="fld"><span>Stores in "<span id="chainChecksLabel">All chains</span>" for Excel export (tick which to include)</span>
         <div id="chainChecks" class="checklist"></div>
       </label>
       <div class="btncol">
-        <button id="chainAll">Select all stores</button>
-        <button id="chainNone">Clear selection</button>
+        <button id="chainAll">Select all shown</button>
+        <button id="chainNone">Clear shown</button>
         <button id="downloadExcel" class="primary">Download Excel — 1 sheet per store</button>
       </div>
     </div>
@@ -207,8 +207,6 @@ const pct = n => (n==null||isNaN(n)) ? "–" : (n*100).toFixed(1)+"%";
 let store = load();
 let charts = {};
 let chainExportSel = new Set();
-let chainExportInited = false;
-let chainExportSeenOnce = new Set();
 
 /* ---------- storage ---------- */
 function load(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }catch(e){ return {}; } }
@@ -276,6 +274,7 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
   const dates = dayCols.map((_,i)=>i+1);
   const chains = {};
   const stores = {};
+  const storeChain = {};
   const add = (obj,d,v,a,s)=>{
     obj.vip[d]+=v; obj.at[d]+=a; obj.saf[d]+=s;
   };
@@ -289,7 +288,7 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
     if(!ch) continue;
     if(!chains[ch]) chains[ch]=blank();
     const st = storeCol>=0 ? norm(row[storeCol]) : null;
-    if(st && !stores[st]) stores[st]=blank();
+    if(st && !stores[st]){ stores[st]=blank(); storeChain[st]=ch; }
     dayCols.forEach((c,i)=>{
       const v = +row[c]||0, a = +row[c+4]||0, s = +row[c+5]||0;
       add(chains[ch],i,v,a,s);
@@ -297,7 +296,7 @@ function parseWorkbook(wb, fname, forcedMonthIdx){
       if(st){ add(stores[st],i,v,a,s); add(stores["All stores"],i,v,a,s); }
     });
   }
-  return { label, sortKey, mIdx, year, sheet:name, dates, chains, stores, file:fname };
+  return { label, sortKey, mIdx, year, sheet:name, dates, chains, stores, storeChain, file:fname };
 }
 
 /* ---------- ingest a single file, pinned to one month tab ---------- */
@@ -367,8 +366,14 @@ document.getElementById("detailmonth").addEventListener("change",e=>{
 document.getElementById("allmonths").addEventListener("click",()=>{
   [...document.getElementById("monthsel").options].forEach(o=>o.selected=true); render();
 });
-document.getElementById("chainAll").addEventListener("click",()=>{ allStoreNames().forEach(c=>chainExportSel.add(c)); render(); });
-document.getElementById("chainNone").addEventListener("click",()=>{ chainExportSel.clear(); render(); });
+document.getElementById("chainAll").addEventListener("click",()=>{
+  allStoreNames(document.getElementById("chain").value).forEach(c=>chainExportSel.add(c));
+  render();
+});
+document.getElementById("chainNone").addEventListener("click",()=>{
+  allStoreNames(document.getElementById("chain").value).forEach(c=>chainExportSel.delete(c));
+  render();
+});
 document.getElementById("downloadExcel").addEventListener("click", exportExcel);
 
 /* ---------- helpers ---------- */
@@ -378,9 +383,14 @@ function allChainNames(){
   monthsSorted().forEach(m=>Object.keys(m.chains).forEach(c=>s.add(c)));
   return [...s].sort((a,b)=> a==="All chains"?-1:b==="All chains"?1:a.localeCompare(b));
 }
-function allStoreNames(){
-  const s = new Set(["All stores"]);
-  monthsSorted().forEach(m=>Object.keys(m.stores||{}).forEach(c=>s.add(c)));
+function allStoreNames(chain){
+  const s = new Set(chain && chain!=="All chains" ? [] : ["All stores"]);
+  monthsSorted().forEach(m=>{
+    Object.keys(m.stores||{}).forEach(store=>{
+      if(store==="All stores") return;
+      if(!chain || chain==="All chains" || (m.storeChain && m.storeChain[store]===chain)) s.add(store);
+    });
+  });
   return [...s].sort((a,b)=> a==="All stores"?-1:b==="All stores"?1:a.localeCompare(b));
 }
 function selectedMonths(){
@@ -473,12 +483,12 @@ function render(){
   const curChain = chainSelEl.value && chains.includes(chainSelEl.value) ? chainSelEl.value : "All chains";
   chainSelEl.innerHTML = chains.map(c=>`<option ${c===curChain?"selected":""}>${c}</option>`).join("");
 
-  // store export checklist (multi-select) — labels come from "Current Store Name"; default: everything ticked the first time it appears
-  const stores = allStoreNames();
-  if(!chainExportInited){ stores.forEach(c=>chainExportSel.add(c)); chainExportInited=true; }
-  else { stores.forEach(c=>{ if(!chainExportSel.has(c) && !chainExportSeenOnce.has(c)) chainExportSel.add(c); chainExportSeenOnce.add(c); }); }
+  // store export checklist (multi-select) — labels come from "Current Store Name", scoped to the
+  // chain picked above. Nothing is pre-ticked: you choose which stores to include.
+  document.getElementById("chainChecksLabel").textContent = curChain;
+  const storesInChain = allStoreNames(curChain);
   const cc=document.getElementById("chainChecks");
-  cc.innerHTML = stores.map(c=>`<label><input type="checkbox" data-chain="${c.replace(/"/g,'&quot;')}" ${chainExportSel.has(c)?"checked":""}> ${c}</label>`).join("");
+  cc.innerHTML = storesInChain.map(c=>`<label><input type="checkbox" data-chain="${c.replace(/"/g,'&quot;')}" ${chainExportSel.has(c)?"checked":""}> ${c}</label>`).join("");
   cc.querySelectorAll("[data-chain]").forEach(cb=>cb.addEventListener("change",()=>{
     if(cb.checked) chainExportSel.add(cb.dataset.chain); else chainExportSel.delete(cb.dataset.chain);
   }));
