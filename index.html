@@ -186,6 +186,16 @@
         <h3>Market share by month (all chains combined) — Vip Total / AT Total / SAF</h3>
         <div class="scroll"><table id="tShare"></table></div>
       </div>
+      <div class="chartbox">
+        <h3>Per-chain workbook, one row per store</h3>
+        <p class="hint" style="margin-top:0">One sheet per chain for the chosen month; each row is a store with its Vip Total / AT Total / SAF, the total, and each brand's market share within that store.</p>
+        <div class="row">
+          <label class="fld">Month
+            <select id="chainStoreMonth"></select>
+          </label>
+          <button id="dlChainStore" class="primary">Download Excel — chain sheets, store rows</button>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -373,6 +383,7 @@ document.querySelectorAll("#ovMetric button").forEach(b=>b.addEventListener("cli
   renderOverview();
 }));
 document.getElementById("dlOverview").addEventListener("click", exportOverviewExcel);
+document.getElementById("dlChainStore").addEventListener("click", exportChainStoreExcel);
 
 document.getElementById("chain").addEventListener("change",render);
 document.getElementById("monthsel").addEventListener("change",render);
@@ -550,6 +561,11 @@ function renderOverview(){
        return `<tr><td>${m.label}</td><td>${fmt(s.vip,1)}</td><td>${fmt(s.at,1)}</td><td>${fmt(s.saf,1)}</td><td>${fmt(t,1)}</td>
          <td>${t?pct(s.vip/t):"–"}</td><td>${t?pct(s.at/t):"–"}</td><td>${t?pct(s.saf/t):"–"}</td></tr>`;
      }).join("")}</tbody>`;
+
+  const csm = document.getElementById("chainStoreMonth");
+  const prevCsm = csm.value;
+  csm.innerHTML = months.map(m=>`<option ${m.label===prevCsm?"selected":""}>${m.label}</option>`).join("");
+  if(!csm.value) csm.value = months[months.length-1].label;
 }
 
 function exportOverviewExcel(){
@@ -584,6 +600,38 @@ function exportOverviewExcel(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shAoa), "Market Share");
 
   XLSX.writeFile(wb, "VIP_DSR_Overview.xlsx");
+}
+
+function exportChainStoreExcel(){
+  const label = document.getElementById("chainStoreMonth").value;
+  const m = store[label];
+  if(!m){ alert("Pick a month first."); return; }
+  if(!m.storeChain){ alert("This month's data predates per-store tracking — remove it (hover the month tile) and re-upload to use this export."); return; }
+
+  const chains = allChainNames().filter(c=>c!=="All chains" && m.chains[c]);
+  const wb = XLSX.utils.book_new();
+  const used = new Set();
+
+  chains.forEach(chain=>{
+    const storeNames = Object.keys(m.storeChain).filter(s=>m.storeChain[s]===chain).sort((a,b)=>a.localeCompare(b));
+    const aoa = [["Store Name","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"]];
+    let cv=0, ca=0, cs=0;
+    storeNames.forEach(storeName=>{
+      const s = storeSeries(m, storeName).sum;
+      const t = s.total;
+      cv+=s.vip; ca+=s.at; cs+=s.saf;
+      aoa.push([storeName, r2(s.vip), r2(s.at), r2(s.saf), r2(t),
+        t?r2(s.vip/t*100):0, t?r2(s.at/t*100):0, t?r2(s.saf/t*100):0]);
+    });
+    const ct = cv+ca+cs;
+    aoa.push(["Total", r2(cv), r2(ca), r2(cs), r2(ct),
+      ct?r2(cv/ct*100):0, ct?r2(ca/ct*100):0, ct?r2(cs/ct*100):0]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{wch:34},{wch:11},{wch:11},{wch:9},{wch:9},{wch:8},{wch:8},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(chain, used));
+  });
+
+  XLSX.writeFile(wb, ("VIP_DSR_ChainSheets_"+label).replace(/\W+/g,"_")+".xlsx");
 }
 
 function renderDetail(chain){
