@@ -212,6 +212,23 @@ let chainExportSel = new Set();
 function load(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }catch(e){ return {}; } }
 function save(){ localStorage.setItem(LS_KEY, JSON.stringify(store)); }
 
+// Months saved by an older version of this tool won't have `stores`/`storeChain`
+// (added when per-store export/filtering was introduced) — that data can't be
+// recovered without re-parsing the original file, so drop it and say so.
+let staleMonthsDropped = [];
+(function migrateStore(){
+  let changed = false;
+  Object.keys(store).forEach(label=>{
+    const m = store[label];
+    if(!m || !m.stores || !m.storeChain){
+      staleMonthsDropped.push(label);
+      delete store[label];
+      changed = true;
+    }
+  });
+  if(changed) save();
+})();
+
 /* ---------- parse a workbook ---------- */
 function norm(s){ return String(s==null?"":s).replace(/\s+/g," ").trim(); }
 
@@ -743,6 +760,9 @@ function exportExcel(){
 }
 
 render();
+if(staleMonthsDropped.length){
+  setLoadMsg(staleMonthsDropped.join(", ")+" "+(staleMonthsDropped.length>1?"were":"was")+" loaded with an older version of this tool and didn't have per-store data — "+(staleMonthsDropped.length>1?"they've":"it's")+" been cleared. Please re-upload the file for "+(staleMonthsDropped.length>1?"those months":"that month")+".", "err");
+}
 </script>
 </body>
 </html>
