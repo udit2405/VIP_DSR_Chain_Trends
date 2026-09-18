@@ -239,6 +239,29 @@ let staleMonthsDropped = [];
   if(changed) save();
 })();
 
+// Pre-published months: a plain JSON file per month, committed to this repo (same idea as
+// VIP_DSR_Store_Explorer's shared snapshot) — lets a brand-new browser see a month immediately
+// instead of requiring every single visitor to re-upload the same file. Once fetched it's saved
+// into this browser's own localStorage like any normal upload, so Remove/re-upload behave
+// exactly the same as for a month you loaded yourself — this only fills in months you don't
+// already have.
+const SHARED_MONTHS = [
+  { label: "Aug 2026", url: "data/aug-2026.json" }
+];
+function loadSharedMonths(){
+  const missing = SHARED_MONTHS.filter(m => !store[m.label]);
+  if(!missing.length) return;
+  Promise.all(missing.map(m =>
+    fetch(m.url).then(r => r.ok ? r.json() : null).catch(() => null)
+  )).then(results => {
+    let changed = false;
+    results.forEach((data, i) => {
+      if(data && !store[missing[i].label]){ store[missing[i].label] = data; changed = true; }
+    });
+    if(changed){ save(); render(); }
+  });
+}
+
 /* ---------- parse a workbook ---------- */
 function norm(s){ return String(s==null?"":s).replace(/\s+/g," ").trim(); }
 
@@ -808,6 +831,7 @@ function exportExcel(){
 }
 
 render();
+loadSharedMonths();
 if(staleMonthsDropped.length){
   setLoadMsg(staleMonthsDropped.join(", ")+" "+(staleMonthsDropped.length>1?"were":"was")+" loaded with an older version of this tool and didn't have per-store data — "+(staleMonthsDropped.length>1?"they've":"it's")+" been cleared. Please re-upload the file for "+(staleMonthsDropped.length>1?"those months":"that month")+".", "err");
 }
