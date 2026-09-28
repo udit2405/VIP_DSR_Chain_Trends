@@ -120,7 +120,7 @@
         <label class="fld">Month for summary export
           <select id="storeExportMonth"></select>
         </label>
-        <button id="downloadExcel" class="primary">Download Excel — 1 row per store</button>
+        <button id="downloadExcel" class="primary">Download Excel — 1 tab per chain</button>
       </div>
     </div>
   </div>
@@ -553,18 +553,18 @@ function render(){
   const prevSel=new Set([...msel.selectedOptions].map(o=>o.value));
   msel.innerHTML = all.map(m=>`<option ${prevSel.size===0||prevSel.has(m.label)?"selected":""}>${m.label}</option>`).join("");
 
-  // store-summary export month — single-select, independent of "Months to compare" above
-  // (which defaults to everything selected), so the summary export defaults to exactly one
-  // row per store instead of one row per store per loaded month.
-  const sem=document.getElementById("storeExportMonth");
-  const prevSem=sem.value;
-  const wantSem = all.some(m=>m.label===prevSem) ? prevSem : all[all.length-1].label;
-  sem.innerHTML = all.map(m=>`<option ${m.label===wantSem?"selected":""}>${m.label}</option>`).join("");
-
   // detail month dropdown — follows the active month tab
   const dm=document.getElementById("detailmonth");
   const wantLabel = (all.find(m=>m.mIdx===activeMonthIdx) || all[all.length-1]).label;
   dm.innerHTML = all.map(m=>`<option ${m.label===wantLabel?"selected":""}>${m.label}</option>`).join("");
+
+  // store-summary export month — single-select, independent of "Months to compare" above
+  // (which defaults to everything selected), so the summary export defaults to exactly one
+  // row per store instead of one row per store per loaded month. Follows the active month
+  // tab (like the detail dropdown above) rather than staying stuck on whatever was picked
+  // before a new month got loaded.
+  const sem=document.getElementById("storeExportMonth");
+  sem.innerHTML = all.map(m=>`<option ${m.label===wantLabel?"selected":""}>${m.label}</option>`).join("");
 
   renderDetail(curChain);
   renderCompare(curChain);
@@ -598,8 +598,7 @@ function renderOverview(){
      }).join("")}</tbody>`;
 
   const csm = document.getElementById("chainStoreMonth");
-  const prevCsm = csm.value;
-  const wantCsm = months.some(m=>m.label===prevCsm) ? prevCsm : months[months.length-1].label;
+  const wantCsm = (months.find(m=>m.mIdx===activeMonthIdx) || months[months.length-1]).label;
   csm.innerHTML = months.map(m=>`<option ${m.label===wantCsm?"selected":""}>${m.label}</option>`).join("");
 }
 
@@ -863,39 +862,48 @@ function sanitizeSheetName(name, used){
 }
 const r2 = n => Math.round((+n||0)*100)/100;
 
-/* One sheet, one row per ticked store, for a single picked month — a flat summary
-   (Store/Chain/Month/Vip/AT/SAF/Total/shares) instead of a separate sheet per store.
-   Stores can span multiple chains, hence the Chain column. The month comes from its
-   own dedicated "Month for summary export" dropdown (deliberately NOT the "Months to
-   compare" multi-select above, which defaults to every loaded month selected — using
-   that here meant every ticked store showed up once per loaded month, e.g. twice
-   whenever both a shared Aug snapshot and a freshly-uploaded Sep were in memory). */
+/* One tab per chain, for a single picked month — each tab lists that chain's ticked
+   stores with the same summary columns as before (Vip/AT/SAF/Total/shares), plus a
+   Total row. The month comes from its own dedicated "Month for summary export"
+   dropdown (deliberately NOT the "Months to compare" multi-select above, which
+   defaults to every loaded month selected — using that here meant every ticked
+   store showed up once per loaded month, e.g. twice whenever both a shared Aug
+   snapshot and a freshly-uploaded Sep were in memory). */
 function exportExcel(){
   const stores = allStoreNames().filter(c=>chainExportSel.has(c));
   if(!stores.length){ alert("Tick at least one store to export."); return; }
   const m = store[document.getElementById("storeExportMonth").value];
   if(!m){ alert("Pick a month first."); return; }
 
-  const aoa = [["Store","Chain","Month","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"]];
-  let gv=0, ga=0, gs=0;
+  // group the ticked stores by chain
+  const byChain = {};
   stores.forEach(storeName=>{
     if(!m.stores || !m.stores[storeName]) return;
-    const s = storeSeries(m, storeName).sum;
-    const t = s.total;
-    const chain = (m.storeChain && m.storeChain[storeName]) || "";
-    gv+=s.vip; ga+=s.at; gs+=s.saf;
-    aoa.push([storeName, chain, m.label, r2(s.vip), r2(s.at), r2(s.saf), r2(t),
-      t?r2(s.vip/t*100):0, t?r2(s.at/t*100):0, t?r2(s.saf/t*100):0]);
+    const chain = (m.storeChain && m.storeChain[storeName]) || "(unknown chain)";
+    (byChain[chain] = byChain[chain] || []).push(storeName);
   });
-  if(aoa.length===1){ alert("No data for the ticked stores in "+m.label+"."); return; }
-  const gt = gv+ga+gs;
-  aoa.push(["Total","","", r2(gv), r2(ga), r2(gs), r2(gt),
-    gt?r2(gv/gt*100):0, gt?r2(ga/gt*100):0, gt?r2(gs/gt*100):0]);
+  const chainNames = Object.keys(byChain).sort((a,b)=>a.localeCompare(b));
+  if(!chainNames.length){ alert("No data for the ticked stores in "+m.label+"."); return; }
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{wch:34},{wch:16},{wch:10},{wch:11},{wch:11},{wch:9},{wch:9},{wch:8},{wch:8},{wch:8}];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Store Summary");
+  const used = new Set();
+  chainNames.forEach(chain=>{
+    const aoa = [["Store Name","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"]];
+    let cv=0, ca=0, cs=0;
+    byChain[chain].sort((a,b)=>a.localeCompare(b)).forEach(storeName=>{
+      const s = storeSeries(m, storeName).sum;
+      const t = s.total;
+      cv+=s.vip; ca+=s.at; cs+=s.saf;
+      aoa.push([storeName, r2(s.vip), r2(s.at), r2(s.saf), r2(t),
+        t?r2(s.vip/t*100):0, t?r2(s.at/t*100):0, t?r2(s.saf/t*100):0]);
+    });
+    const ct = cv+ca+cs;
+    aoa.push(["Total", r2(cv), r2(ca), r2(cs), r2(ct),
+      ct?r2(cv/ct*100):0, ct?r2(ca/ct*100):0, ct?r2(cs/ct*100):0]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{wch:34},{wch:11},{wch:11},{wch:9},{wch:9},{wch:8},{wch:8},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(chain, used));
+  });
   XLSX.writeFile(wb, ("VIP_DSR_StoreSummary_"+m.label).replace(/\W+/g,"_")+".xlsx");
 }
 
