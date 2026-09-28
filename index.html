@@ -143,6 +143,7 @@
       </div>
       <div class="chartbox">
         <h3>Date-wise table
+          <button id="dlDetailWide" style="float:right;padding:4px 9px;font-size:12px;margin-left:8px">Download Excel — chain, stores as columns</button>
           <button id="dlDetail" style="float:right;padding:4px 9px;font-size:12px">Download CSV</button>
         </h3>
         <div class="scroll"><table id="tDetail"></table></div>
@@ -657,6 +658,55 @@ function exportChainStoreExcel(){
   XLSX.writeFile(wb, ("VIP_DSR_ChainSheets_"+label).replace(/\W+/g,"_")+".xlsx");
 }
 
+/* One sheet for a single chain+month: row 1 = store names (each spanning its own
+   Vip Total/AT Total/SAF columns), one row per date, then a Total row and three
+   market-share rows (VIP %/AT %/SAF %) per store at the bottom. */
+function exportChainWideExcel(chain, m){
+  if(!m){ alert("Pick a month first."); return; }
+  if(!m.storeChain){ alert("This month's data predates per-store tracking — remove it (hover the month tile) and re-upload to use this export."); return; }
+
+  const storeNames = Object.keys(m.storeChain).filter(s=>m.storeChain[s]===chain).sort((a,b)=>a.localeCompare(b));
+  if(!storeNames.length){ alert("No stores found for \""+chain+"\" in "+m.label+"."); return; }
+
+  const row1 = ["Date"], row2 = [""];
+  storeNames.forEach(s=>{ row1.push(s,"",""); row2.push("Vip Total","AT Total","SAF"); });
+  const aoa = [row1, row2];
+
+  const perStoreSum = storeNames.map(()=>({vip:0,at:0,saf:0}));
+  const seriesByStore = storeNames.map(s=>storeSeries(m, s));
+
+  m.dates.forEach((d,i)=>{
+    const row = [d+" "+MONTHS[m.mIdx]];
+    seriesByStore.forEach((ss,si)=>{
+      const vip=ss.vip[i]||0, at=ss.at[i]||0, saf=ss.saf[i]||0;
+      row.push(r2(vip), r2(at), r2(saf));
+      perStoreSum[si].vip+=vip; perStoreSum[si].at+=at; perStoreSum[si].saf+=saf;
+    });
+    aoa.push(row);
+  });
+
+  const totalRow = ["Total"];
+  perStoreSum.forEach(s=> totalRow.push(r2(s.vip), r2(s.at), r2(s.saf)));
+  aoa.push(totalRow);
+
+  const vipPct=["VIP %"], atPct=["AT %"], safPct=["SAF %"];
+  perStoreSum.forEach(s=>{
+    const t = s.vip+s.at+s.saf;
+    vipPct.push(t?r2(s.vip/t*100):0, "", "");
+    atPct.push("", t?r2(s.at/t*100):0, "");
+    safPct.push("", "", t?r2(s.saf/t*100):0);
+  });
+  aoa.push(vipPct, atPct, safPct);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!merges"] = storeNames.map((_,i)=>({ s:{r:0,c:1+3*i}, e:{r:0,c:3+3*i} }));
+  ws["!cols"] = [{wch:14}].concat(storeNames.flatMap(()=>[{wch:11},{wch:11},{wch:9}]));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(chain, new Set()));
+  XLSX.writeFile(wb, ("VIP_DSR_"+chain+"_"+m.label+"_wide").replace(/\W+/g,"_")+".xlsx");
+}
+
 function renderDetail(chain){
   const m = store[document.getElementById("detailmonth").value];
   if(!m) return;
@@ -698,6 +748,8 @@ function renderDetail(chain){
   document.getElementById("dlDetail").onclick = ()=>csv(`DSR_${chain}_${m.label}`.replace(/\W+/g,"_"),
     ["Date","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"],
     s.dates.map((d,i)=>{const t=s.vip[i]+s.at[i]+s.saf[i];return [d+" "+MONTHS[m.mIdx],s.vip[i],s.at[i],s.saf[i],t,t?s.vip[i]/t:"",t?s.at[i]/t:"",t?s.saf[i]/t:""];}));
+
+  document.getElementById("dlDetailWide").onclick = ()=>exportChainWideExcel(chain, m);
 }
 
 function renderCompare(chain){
