@@ -117,7 +117,7 @@
       <div class="btncol">
         <button id="chainAll">Select all shown</button>
         <button id="chainNone">Clear shown</button>
-        <button id="downloadExcel" class="primary">Download Excel — 1 sheet per store</button>
+        <button id="downloadExcel" class="primary">Download Excel — 1 row per store</button>
       </div>
     </div>
   </div>
@@ -852,34 +852,39 @@ function sanitizeSheetName(name, used){
 }
 const r2 = n => Math.round((+n||0)*100)/100;
 
+/* One sheet, one row per ticked store per loaded month — a flat summary
+   (Store/Chain/Month/Vip/AT/SAF/Total/shares) instead of a separate sheet
+   per store. Stores can span multiple chains, hence the Chain column. */
 function exportExcel(){
   const stores = allStoreNames().filter(c=>chainExportSel.has(c));
   if(!stores.length){ alert("Tick at least one store to export."); return; }
   const months = monthsSorted();
   if(!months.length) return;
 
-  const wb = XLSX.utils.book_new();
-  const used = new Set();
-  stores.forEach(store=>{
-    const aoa = [["Month","Date","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"]];
+  const aoa = [["Store","Chain","Month","Vip Total","AT Total","SAF","Total","VIP %","AT %","SAF %"]];
+  let gv=0, ga=0, gs=0;
+  stores.forEach(storeName=>{
     months.forEach(m=>{
-      if(!m.stores || !m.stores[store]) return;
-      const s = storeSeries(m,store);
-      s.dates.forEach((d,i)=>{
-        const t = s.vip[i]+s.at[i]+s.saf[i];
-        aoa.push([m.label, d+" "+MONTHS[m.mIdx], r2(s.vip[i]), r2(s.at[i]), r2(s.saf[i]), r2(t),
-          t?r2(s.vip[i]/t*100):0, t?r2(s.at[i]/t*100):0, t?r2(s.saf[i]/t*100):0]);
-      });
-      aoa.push([m.label+" — Total","", r2(s.sum.vip), r2(s.sum.at), r2(s.sum.saf), r2(s.sum.total),
-        s.sum.total?r2(s.sum.vip/s.sum.total*100):0, s.sum.total?r2(s.sum.at/s.sum.total*100):0, s.sum.total?r2(s.sum.saf/s.sum.total*100):0]);
+      if(!m.stores || !m.stores[storeName]) return;
+      const s = storeSeries(m, storeName).sum;
+      const t = s.total;
+      const chain = (m.storeChain && m.storeChain[storeName]) || "";
+      gv+=s.vip; ga+=s.at; gs+=s.saf;
+      aoa.push([storeName, chain, m.label, r2(s.vip), r2(s.at), r2(s.saf), r2(t),
+        t?r2(s.vip/t*100):0, t?r2(s.at/t*100):0, t?r2(s.saf/t*100):0]);
     });
-    if(aoa.length===1) aoa.push(["No data for this store in the loaded months."]);
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{wch:14},{wch:12},{wch:11},{wch:11},{wch:9},{wch:9},{wch:8},{wch:8},{wch:8}];
-    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(store, used));
   });
+  if(aoa.length===1){ alert("No data for the ticked stores in the loaded months."); return; }
+  const gt = gv+ga+gs;
+  aoa.push(["Total","","", r2(gv), r2(ga), r2(gs), r2(gt),
+    gt?r2(gv/gt*100):0, gt?r2(ga/gt*100):0, gt?r2(gs/gt*100):0]);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:34},{wch:16},{wch:10},{wch:11},{wch:11},{wch:9},{wch:9},{wch:8},{wch:8},{wch:8}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Store Summary");
   const stamp = months.length>1 ? (months[0].label+"–"+months[months.length-1].label) : months[0].label;
-  XLSX.writeFile(wb, ("VIP_DSR_by_store_"+stamp).replace(/\W+/g,"_")+".xlsx");
+  XLSX.writeFile(wb, ("VIP_DSR_StoreSummary_"+stamp).replace(/\W+/g,"_")+".xlsx");
 }
 
 render();
